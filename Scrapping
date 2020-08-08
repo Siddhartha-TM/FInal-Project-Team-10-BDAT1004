@@ -1,0 +1,110 @@
+'''
+    Python 3.8
+    Database : MongoDB
+    Use following cmd commands to install required libraries
+    Library 1 - pip install requests BeautifulSoup4
+    Library 2 - pip install pymongo==3.4.0
+'''
+
+from requests import get
+from requests.exceptions import RequestException
+from contextlib import closing
+from bs4 import BeautifulSoup
+import re
+from pymongo import MongoClient
+
+
+# MongoDB Configuration 
+client = MongoClient('localhost', 27017)
+db = client['gamedb']
+game = db['game']
+index = 1
+
+headers = {
+    "content-type":"application/json",
+    "accept" : "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.105 Safari/537.36"
+}
+
+
+def getRequest(url):
+    """
+    Attempts to get the content at `url` by making an HTTP GET request.
+    """
+    try:
+        with closing(get(url,headers=headers,stream=True)) as resp:
+            if is_good_response(resp):
+                return resp.content
+            else:
+                return None
+    except RequestException as e:
+        log_error('Error during requests to {0} : {1}'.format(url, str(e)))
+        return None
+
+
+def is_good_response(resp):
+    """
+    Returns True if the response seems to be HTML, False otherwise.
+    """
+    content_type = resp.headers['Content-Type'].lower()
+    return (resp.status_code == 200 
+            and content_type is not None 
+            and content_type.find('html') > -1)
+
+def log_error(e):
+    print(e)
+
+
+
+def filterInfo():
+    try:
+        raw_html = getRequest('https://en.wikipedia.org/wiki/List_of_Xbox_360_games_(A-L)')
+        if raw_html is not None:
+            html = BeautifulSoup(raw_html, 'html.parser')
+            table = html.find("table", {"id": "softwarelist"})
+            tbody = table.select('tbody')
+            trs = tbody[0].select('tr')
+            count = 0
+            for tr in trs:
+                count += 1
+                if count <= 2:
+                    continue
+                else:
+                    data = dict()
+                    tds = tr.select('td')
+                    data['Title'] = tds[0].text
+                    data['Genre'] = tds[1].text
+                    data['Developer'] = tds[2].text
+                    data['Publisher'] = tds[3].text
+                    data['NA'] = tds[4].text
+                    data['EU'] = tds[5].text
+                    data['JP'] = tds[6].text
+                    data['AU'] = tds[7].text
+                    data['Addons'] = tds[8].text
+                    data['XboxOne'] = tds[9].text
+                    print(data)
+                    insert(data)
+            return "DONE"
+        else:
+            return None
+    except e:
+        return None
+    
+
+def insert(data):
+    print(data)
+    flag = True
+    title = data['Title']
+    query = { "Title": title}
+    for i in game.find(query):
+        flag = False
+        break
+    if flag:
+        game.insert_one(data)
+        
+
+if __name__ == "__main__":
+    print('Scrapping ...')
+    filterInfo()
+    print('DONE')
+    
